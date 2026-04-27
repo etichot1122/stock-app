@@ -83,13 +83,19 @@ def tech(df, market_df):
 # ===============================
 def sharpe(df):
     r = df["Close"].pct_change().dropna()
+
     if len(r) < 30:
         return 0.0
-    std = r.std()
-    if std == 0 or pd.isna(std):
-        return 0.0
-    return float((r.mean() / std) * np.sqrt(252))
 
+    r = r.astype(float)
+
+    mean = r.mean()
+    std = r.std()
+
+    if pd.isna(std) or std == 0:
+        return 0.0
+
+    return float((mean / std) * np.sqrt(252))
 # ===============================
 # 📊 UI
 # ===============================
