@@ -1,7 +1,4 @@
-requirements.txt
-FinMind==1.6.4
-tqdm
-requests
+streamlit
+yfinance
 pandas
 numpy
-streamlit
