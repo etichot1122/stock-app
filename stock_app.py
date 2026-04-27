@@ -1,5 +1,5 @@
 # ===============================
-# 📊 0050 選股系統（Cloud穩定完整版）
+# 📊 0050 選股系統（終極穩定版）
 # ===============================
 
 import streamlit as st
@@ -26,7 +26,20 @@ stocks = [
 market = "^TWII"
 
 # ===============================
-# 📌 Data（防空資料）
+# 📌 Safe function（核心防炸）
+# ===============================
+def safe(x):
+    try:
+        if x is None:
+            return np.nan
+        if isinstance(x, pd.Series):
+            x = x.iloc[-1]
+        return float(x)
+    except:
+        return np.nan
+
+# ===============================
+# 📌 Data
 # ===============================
 @st.cache_data
 def get_data(stock):
@@ -45,15 +58,6 @@ def get_index():
         return df if df is not None else pd.DataFrame()
     except:
         return pd.DataFrame()
-
-# ===============================
-# 📌 safe float
-# ===============================
-def f(x):
-    try:
-        return float(np.array(x).reshape(-1)[0])
-    except:
-        return np.nan
 
 # ===============================
 # 📌 基本面
@@ -76,11 +80,14 @@ def tech(df, market_df):
     try:
         c = df["Close"]
 
-        price = float(c.iloc[-1])
-        ma60 = float(c.rolling(60).mean().iloc[-1])
+        if len(c) < 30:
+            return np.nan, np.nan, np.nan
 
-        stock_ret = float(c.pct_change(20).iloc[-1])
-        market_ret = float(market_df["Close"].pct_change(20).iloc[-1])
+        price = safe(c.iloc[-1])
+        ma60 = safe(c.rolling(60).mean().iloc[-1])
+
+        stock_ret = safe(c.pct_change(20).iloc[-1])
+        market_ret = safe(market_df["Close"].pct_change(20).iloc[-1])
 
         alpha20 = stock_ret - market_ret
 
@@ -89,16 +96,18 @@ def tech(df, market_df):
         return np.nan, np.nan, np.nan
 
 # ===============================
-# 📌 Sharpe（🔥最穩版本）
+# 📌 Sharpe（終極穩定）
 # ===============================
 def sharpe(df):
     try:
+        if df is None or df.empty:
+            return 0.0
+
         r = df["Close"].pct_change().dropna()
+        r = pd.to_numeric(r, errors="coerce").dropna()
 
         if len(r) < 30:
             return 0.0
-
-        r = pd.to_numeric(r, errors="coerce").dropna()
 
         mean = float(r.mean())
         std = float(r.std())
@@ -114,7 +123,7 @@ def sharpe(df):
 # ===============================
 # 📊 UI
 # ===============================
-st.title("📊 0050 選股系統（Cloud穩定版）")
+st.title("📊 0050 選股系統（終極穩定版）")
 
 market_df = get_index()
 
@@ -170,7 +179,7 @@ df = pd.DataFrame(results, columns=[
 ])
 
 # ===============================
-# 📊 Filter
+# 📊 Filter UI
 # ===============================
 only_pass = st.sidebar.checkbox("只顯示通過", True)
 
