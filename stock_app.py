@@ -1,5 +1,5 @@
 # ===============================
-# 📊 0050 選股系統（可部署穩定版）
+# 📊 0050 選股系統（Cloud穩定完整版）
 # ===============================
 
 import streamlit as st
@@ -26,15 +26,25 @@ stocks = [
 market = "^TWII"
 
 # ===============================
-# 📌 Data
+# 📌 Data（防空資料）
 # ===============================
 @st.cache_data
 def get_data(stock):
-    return yf.download(stock, period="6mo", auto_adjust=False)
+    try:
+        df = yf.download(stock, period="6mo", auto_adjust=False, progress=False)
+        if df is None or df.empty:
+            return pd.DataFrame()
+        return df
+    except:
+        return pd.DataFrame()
 
 @st.cache_data
 def get_index():
-    return yf.download(market, period="6mo", auto_adjust=False)
+    try:
+        df = yf.download(market, period="6mo", auto_adjust=False, progress=False)
+        return df if df is not None else pd.DataFrame()
+    except:
+        return pd.DataFrame()
 
 # ===============================
 # 📌 safe float
@@ -43,7 +53,7 @@ def f(x):
     try:
         return float(np.array(x).reshape(-1)[0])
     except:
-        return 0.0
+        return np.nan
 
 # ===============================
 # 📌 基本面
@@ -60,17 +70,17 @@ def fundamental(stock):
         return np.nan, np.nan, np.nan
 
 # ===============================
-# 📌 技術
+# 📌 技術面
 # ===============================
 def tech(df, market_df):
     try:
         c = df["Close"]
 
-        price = f(c.iloc[-1])
-        ma60 = f(c.rolling(60).mean().iloc[-1])
+        price = float(c.iloc[-1])
+        ma60 = float(c.rolling(60).mean().iloc[-1])
 
-        stock_ret = f(c.pct_change(20).iloc[-1])
-        market_ret = f(market_df["Close"].pct_change(20).iloc[-1])
+        stock_ret = float(c.pct_change(20).iloc[-1])
+        market_ret = float(market_df["Close"].pct_change(20).iloc[-1])
 
         alpha20 = stock_ret - market_ret
 
@@ -79,27 +89,32 @@ def tech(df, market_df):
         return np.nan, np.nan, np.nan
 
 # ===============================
-# 📌 Sharpe
+# 📌 Sharpe（🔥最穩版本）
 # ===============================
 def sharpe(df):
-    r = df["Close"].pct_change().dropna()
+    try:
+        r = df["Close"].pct_change().dropna()
 
-    if len(r) < 30:
+        if len(r) < 30:
+            return 0.0
+
+        r = pd.to_numeric(r, errors="coerce").dropna()
+
+        mean = float(r.mean())
+        std = float(r.std())
+
+        if std == 0 or np.isnan(std):
+            return 0.0
+
+        return float((mean / std) * np.sqrt(252))
+
+    except:
         return 0.0
 
-    r = r.astype(float)
-
-    mean = r.mean()
-    std = r.std()
-
-    if pd.isna(std) or std == 0:
-        return 0.0
-
-    return float((mean / std) * np.sqrt(252))
 # ===============================
 # 📊 UI
 # ===============================
-st.title("📊 0050 選股系統（雲端版）")
+st.title("📊 0050 選股系統（Cloud穩定版）")
 
 market_df = get_index()
 
@@ -107,7 +122,8 @@ results = []
 
 for s in stocks:
     df = get_data(s)
-    if df is None or df.empty:
+
+    if df.empty:
         continue
 
     pe, roe, mcap = fundamental(s)
@@ -116,14 +132,18 @@ for s in stocks:
 
     pass_filter = True
 
-    # 基本面條件
+    # ===============================
+    # 📌 基本面
+    # ===============================
     if not np.isnan(pe) and pe > 25:
         pass_filter = False
 
     if not np.isnan(roe) and roe < 0.15:
         pass_filter = False
 
-    # 技術面
+    # ===============================
+    # 📌 技術面
+    # ===============================
     if not np.isnan(price) and not np.isnan(ma60):
         if price < ma60:
             pass_filter = False
@@ -131,7 +151,9 @@ for s in stocks:
     if not np.isnan(alpha20) and alpha20 < 0:
         pass_filter = False
 
-    # 市值
+    # ===============================
+    # 📌 市值
+    # ===============================
     if not np.isnan(mcap) and mcap > 1e11:
         pass_filter = False
 
@@ -148,7 +170,7 @@ df = pd.DataFrame(results, columns=[
 ])
 
 # ===============================
-# 📊 篩選
+# 📊 Filter
 # ===============================
 only_pass = st.sidebar.checkbox("只顯示通過", True)
 
@@ -157,5 +179,8 @@ if only_pass:
 
 df = df.sort_values("Sharpe", ascending=False)
 
-st.subheader("📊 結果")
+# ===============================
+# 📊 Output
+# ===============================
+st.subheader("📊 篩選結果")
 st.dataframe(df, use_container_width=True)
