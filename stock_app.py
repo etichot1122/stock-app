@@ -1,129 +1,103 @@
-# ===============================
-# 📊 0050 選股系統（終極穩定版）
-# ===============================
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
 
-st.set_page_config(page_title="0050選股系統", layout="wide")
+st.set_page_config(page_title="券商級選股系統", layout="wide")
 
 # ===============================
-# 📌 0050 成分股
+# 📌 股票池（0050 + 強化）
 # ===============================
 stocks = [
-    "2330.TW","2308.TW","2317.TW","2454.TW","3711.TW","2891.TW",
-    "2345.TW","2383.TW","2382.TW","2881.TW","2882.TW","2303.TW",
-    "3017.TW","2360.TW","2887.TW","2412.TW","2884.TW","2885.TW",
-    "2886.TW","2890.TW","2357.TW","3231.TW","2327.TW","1303.TW",
-    "1216.TW","6669.TW","3653.TW","2880.TW","2892.TW","2883.TW",
-    "2368.TW","2449.TW","2344.TW","2301.TW","5880.TW","2408.TW",
-    "2603.TW","2002.TW","3008.TW","3661.TW","1301.TW","4904.TW",
-    "3045.TW","2395.TW","2207.TW","6505.TW"
+    "2330.TW","2308.TW","2317.TW","2454.TW","2382.TW",
+    "2881.TW","2882.TW","2886.TW","2891.TW","2303.TW",
+    "3711.TW","2412.TW","1303.TW","1301.TW","2002.TW",
+    "2603.TW","3008.TW","2383.TW","2357.TW","3045.TW"
 ]
 
 market = "^TWII"
-
-# ===============================
-# 📌 Safe function（核心防炸）
-# ===============================
-def safe(x):
-    try:
-        if x is None:
-            return np.nan
-        if isinstance(x, pd.Series):
-            x = x.iloc[-1]
-        return float(x)
-    except:
-        return np.nan
 
 # ===============================
 # 📌 Data
 # ===============================
 @st.cache_data
 def get_data(stock):
-    try:
-        df = yf.download(stock, period="6mo", auto_adjust=False, progress=False)
-        if df is None or df.empty:
-            return pd.DataFrame()
-        return df
-    except:
-        return pd.DataFrame()
+    return yf.download(stock, period="1y", auto_adjust=False).dropna()
 
 @st.cache_data
 def get_index():
-    try:
-        df = yf.download(market, period="6mo", auto_adjust=False, progress=False)
-        return df if df is not None else pd.DataFrame()
-    except:
-        return pd.DataFrame()
+    return yf.download(market, period="1y", auto_adjust=False).dropna()
 
 # ===============================
-# 📌 基本面
+# 📌 技術指標
+# ===============================
+def tech_score(df):
+    c = df["Close"]
+
+    ma20 = c.rolling(20).mean()
+    ma60 = c.rolling(60).mean()
+
+    rsi = 100 - (100 / (1 + c.pct_change().rolling(14).mean()))
+
+    trend = 0
+
+    if c.iloc[-1] > ma20.iloc[-1]:
+        trend += 1
+    if c.iloc[-1] > ma60.iloc[-1]:
+        trend += 1
+    if ma20.iloc[-1] > ma60.iloc[-1]:
+        trend += 1
+    if rsi.iloc[-1] > 50:
+        trend += 1
+
+    return trend / 4 * 100
+
+# ===============================
+# 📌 動能
+# ===============================
+def momentum(df, market_df):
+    c = df["Close"]
+
+    r5 = c.pct_change(5).iloc[-1]
+    r20 = c.pct_change(20).iloc[-1]
+    r60 = c.pct_change(60).iloc[-1]
+
+    mkt = market_df["Close"].pct_change(20).iloc[-1]
+
+    alpha = r20 - mkt
+
+    return (r5*0.2 + r20*0.5 + r60*0.3) * 100 + alpha * 100
+
+# ===============================
+# 📌 籌碼（用量能替代）
+# ===============================
+def chip(df):
+    v = df["Volume"]
+
+    if len(v) < 20:
+        return 0
+
+    return (v.tail(5).mean() / v.tail(20).mean()) * 100
+
+# ===============================
+# 📌 基本面（簡化穩定版）
 # ===============================
 def fundamental(stock):
     try:
         info = yf.Ticker(stock).info
-        return (
-            info.get("trailingPE", np.nan),
-            info.get("returnOnEquity", np.nan),
-            info.get("marketCap", np.nan),
-        )
+        pb = info.get("priceToBook", np.nan)
+
+        if np.isnan(pb):
+            return 50
+
+        return max(0, 100 - pb * 10)
     except:
-        return np.nan, np.nan, np.nan
-
-# ===============================
-# 📌 技術面
-# ===============================
-def tech(df, market_df):
-    try:
-        c = df["Close"]
-
-        if len(c) < 30:
-            return np.nan, np.nan, np.nan
-
-        price = safe(c.iloc[-1])
-        ma60 = safe(c.rolling(60).mean().iloc[-1])
-
-        stock_ret = safe(c.pct_change(20).iloc[-1])
-        market_ret = safe(market_df["Close"].pct_change(20).iloc[-1])
-
-        alpha20 = stock_ret - market_ret
-
-        return price, ma60, alpha20
-    except:
-        return np.nan, np.nan, np.nan
-
-# ===============================
-# 📌 Sharpe（終極穩定）
-# ===============================
-def sharpe(df):
-    try:
-        if df is None or df.empty:
-            return 0.0
-
-        r = df["Close"].pct_change().dropna()
-        r = pd.to_numeric(r, errors="coerce").dropna()
-
-        if len(r) < 30:
-            return 0.0
-
-        mean = float(r.mean())
-        std = float(r.std())
-
-        if std == 0 or np.isnan(std):
-            return 0.0
-
-        return float((mean / std) * np.sqrt(252))
-
-    except:
-        return 0.0
+        return 50
 
 # ===============================
 # 📊 UI
 # ===============================
-st.title("📊 0050 選股系統（終極穩定版）")
+st.title("📊 券商級選股系統 v1")
 
 market_df = get_index()
 
@@ -135,61 +109,25 @@ for s in stocks:
     if df.empty:
         continue
 
-    pe, roe, mcap = fundamental(s)
-    price, ma60, alpha20 = tech(df, market_df)
-    sh = sharpe(df)
+    t = tech_score(df)
+    m = momentum(df, market_df)
+    c = chip(df)
+    f = fundamental(s)
 
-    pass_filter = True
+    score = (
+        t * 0.4 +
+        m * 0.3 +
+        c * 0.2 +
+        f * 0.1
+    )
 
-    # ===============================
-    # 📌 基本面
-    # ===============================
-    if not np.isnan(pe) and pe > 25:
-        pass_filter = False
-
-    if not np.isnan(roe) and roe < 0.15:
-        pass_filter = False
-
-    # ===============================
-    # 📌 技術面
-    # ===============================
-    if not np.isnan(price) and not np.isnan(ma60):
-        if price < ma60:
-            pass_filter = False
-
-    if not np.isnan(alpha20) and alpha20 < 0:
-        pass_filter = False
-
-    # ===============================
-    # 📌 市值
-    # ===============================
-    if not np.isnan(mcap) and mcap > 1e11:
-        pass_filter = False
-
-    results.append([
-        s, pe, roe, mcap,
-        price, ma60, alpha20,
-        sh, pass_filter
-    ])
+    results.append([s, t, m, c, f, score])
 
 df = pd.DataFrame(results, columns=[
-    "股票","PE","ROE","市值",
-    "現價","60MA","20日Alpha",
-    "Sharpe","通過"
+    "股票","技術","動能","籌碼","基本面","總分"
 ])
 
-# ===============================
-# 📊 Filter UI
-# ===============================
-only_pass = st.sidebar.checkbox("只顯示通過", True)
+df = df.sort_values("總分", ascending=False)
 
-if only_pass:
-    df = df[df["通過"] == True]
-
-df = df.sort_values("Sharpe", ascending=False)
-
-# ===============================
-# 📊 Output
-# ===============================
-st.subheader("📊 篩選結果")
+st.subheader("📊 券商級選股排名")
 st.dataframe(df, use_container_width=True)
