@@ -1,5 +1,5 @@
 # ===============================
-# 📊 0050 券商級選股系統（穩定完整版）
+# 📊 0050選股系統（完整版 + 報酬曲線 v2）
 # ===============================
 
 import streamlit as st
@@ -9,9 +9,6 @@ import numpy as np
 
 st.set_page_config(page_title="0050選股系統", layout="wide")
 
-# ===============================
-# 📌 0050 成分股（完整版）
-# ===============================
 stocks = [
     "2330.TW","2308.TW","2317.TW","2454.TW","3711.TW","2891.TW",
     "2345.TW","2383.TW","2382.TW","2881.TW","2882.TW","2303.TW",
@@ -30,19 +27,16 @@ market = "^TWII"
 # ===============================
 @st.cache_data
 def get_data(stock):
-    df = yf.download(stock, period="6mo", auto_adjust=False)
-    df = df.dropna()
-    return df
+    return yf.download(stock, period="6mo").dropna()
 
 @st.cache_data
 def get_index():
-    df = yf.download(market, period="6mo", auto_adjust=False)
-    return df.dropna()
+    return yf.download(market, period="6mo").dropna()
 
 # ===============================
-# 📌 safe float（核心修正）
+# 📌 safe float（關鍵修正）
 # ===============================
-def safe(x):
+def f(x):
     try:
         if isinstance(x, pd.Series):
             return float(x.iloc[-1])
@@ -51,65 +45,63 @@ def safe(x):
         return np.nan
 
 # ===============================
-# 📌 基本面（完全防 None）
+# 📌 基本面
 # ===============================
 def fundamental(stock):
     try:
         info = yf.Ticker(stock).info
-        pe = safe(info.get("trailingPE"))
-        roe = safe(info.get("returnOnEquity"))
-        mcap = safe(info.get("marketCap"))
-        return pe, roe, mcap
+        return (
+            info.get("trailingPE", np.nan),
+            info.get("returnOnEquity", np.nan),
+            info.get("marketCap", np.nan),
+        )
     except:
         return np.nan, np.nan, np.nan
 
 # ===============================
-# 📌 技術面（券商風格）
+# 📌 技術面（完全防炸）
 # ===============================
 def tech(df, market_df):
     try:
         c = df["Close"]
 
-        price = safe(c.iloc[-1])
-        ma60 = safe(c.rolling(60).mean().iloc[-1])
+        price = f(c)
+        ma60 = f(c.rolling(60).mean())
 
-        stock_ret = safe(c.pct_change(20).iloc[-1])
-        market_ret = safe(market_df["Close"].pct_change(20).iloc[-1])
+        stock_ret = f(c.pct_change(20))
+        market_ret = f(market_df["Close"].pct_change(20))
 
-        alpha20 = stock_ret - market_ret
+        alpha = stock_ret - market_ret
 
-        return price, ma60, alpha20
+        return price, ma60, alpha
     except:
         return np.nan, np.nan, np.nan
 
 # ===============================
-# 📌 Sharpe（100% 防炸版）
+# 📌 Sharpe（穩定版）
 # ===============================
 def sharpe(df):
-    try:
-        r = df["Close"].pct_change().dropna()
+    r = df["Close"].pct_change().dropna()
 
-        if len(r) < 30:
-            return 0.0
-
-        std = float(r.std())
-        mean = float(r.mean())
-
-        if np.isnan(std) or std == 0:
-            return 0.0
-
-        return float((mean / std) * np.sqrt(252))
-    except:
+    if len(r) < 30:
         return 0.0
+
+    std = float(r.std())
+    mean = float(r.mean())
+
+    if np.isnan(std) or std == 0:
+        return 0.0
+
+    return float((mean / std) * np.sqrt(252))
 
 # ===============================
 # 📊 UI
 # ===============================
-st.title("📊 0050 券商級選股系統（穩定版）")
+st.title("📊 0050選股系統（穩定部署版 v2）")
 
 market_df = get_index()
 
-results = []
+rows = []
 
 # ===============================
 # 📌 主迴圈
@@ -120,71 +112,59 @@ for s in stocks:
         continue
 
     pe, roe, mcap = fundamental(s)
-    price, ma60, alpha20 = tech(df, market_df)
+    price, ma60, alpha = tech(df, market_df)
     sh = sharpe(df)
 
-    # ===============================
-    # 📌 防 None 顯示
-    # ===============================
-    pe = pe if not pd.isna(pe) else np.nan
-    roe = roe if not pd.isna(roe) else np.nan
-    mcap = mcap if not pd.isna(mcap) else np.nan
+    ok = True
 
-    # ===============================
-    # 📌 總分（券商模型）
-    # ===============================
-    score = 0
+    # 基本面
+    if not np.isnan(pe) and pe > 25:
+        ok = False
+    if not np.isnan(roe) and roe < 0.15:
+        ok = False
 
-    if not np.isnan(pe):
-        score += max(0, 30 - pe)
+    # 技術面
+    if not np.isnan(price) and not np.isnan(ma60):
+        if price < ma60:
+            ok = False
 
-    if not np.isnan(roe):
-        score += roe * 200
+    if not np.isnan(alpha) and alpha < 0:
+        ok = False
 
-    if not np.isnan(alpha20):
-        score += alpha20 * 100
+    # 市值
+    if not np.isnan(mcap) and mcap > 1e11:
+        ok = False
 
-    score += sh * 10
+    rows.append([s, pe, roe, mcap, price, ma60, alpha, sh, ok])
 
-    results.append([
-        s, pe, roe, mcap,
-        price, ma60, alpha20,
-        sh, score
-    ])
-
-# ===============================
-# 📊 DataFrame（修正排序 bug）
-# ===============================
-df = pd.DataFrame(results, columns=[
-    "股票","PE","ROE","市值",
-    "現價","60MA","20日Alpha",
-    "Sharpe","總分"
+df = pd.DataFrame(rows, columns=[
+    "股票","PE","ROE","市值","現價","60MA","Alpha","Sharpe","通過"
 ])
 
-# 保證全部 numeric
-df["總分"] = pd.to_numeric(df["總分"], errors="coerce")
-df = df.dropna(subset=["總分"])
+df = df[df["通過"] == True].copy()
+df = df.sort_values("Sharpe", ascending=False)
 
-# 排序（避免你之前 crash）
-df = df.sort_values(by="總分", ascending=False)
-
-# ===============================
-# 📊 Sidebar（券商風格）
-# ===============================
-st.sidebar.header("📌 篩選器")
-
-min_score = st.sidebar.slider("最低總分", 0, 500, 50)
-only_positive_alpha = st.sidebar.checkbox("只看資金流入(Alpha > 0)", True)
-
-filtered = df.copy()
-
-filtered = filtered[filtered["總分"] >= min_score]
-
-if only_positive_alpha:
-    filtered = filtered[filtered["20日Alpha"] > 0]
+st.subheader("📊 篩選結果")
+st.dataframe(df, use_container_width=True)
 
 # ===============================
-# 📊 Output
+# 📈 報酬曲線（修正版：真正投組）
 # ===============================
-st.subheader("📊 篩選結果（券商風格）")
-st.dataframe(filtered, use_container_width=True)
+st.subheader("📈 投資報酬曲線")
+
+top_n = st.slider("選幾檔", 1, 10, 5)
+
+top_stocks = df.head(top_n)["股票"].tolist()
+
+portfolio = pd.DataFrame()
+
+for s in top_stocks:
+    data = get_data(s)
+    portfolio[s] = data["Close"].pct_change()
+
+# ✔ 改成「等權投組」
+portfolio["portfolio"] = portfolio.mean(axis=1)
+
+cum = (1 + portfolio["portfolio"].fillna(0)).cumprod()
+
+st.line_chart(cum)
